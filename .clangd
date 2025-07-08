@@ -1,0 +1,18 @@
+CompileFlags:
+  Add: [-std=c99, -pedantic-errors, -Wall, -Wextra, -Werror]
+
+CompileFlags:
+  CompilationDatabase: build
+
+Diagnostics:
+  ClangTidy:
+    Add: [bugprone-*, readability-*, portability-*]
+    Remove: [modernize-*, cppcoreguidelines-*]  # Remove C++-centric checks
+
+Index:
+  Background: true
+  StandardLibrary: true
+
+InlayHints:
+  ParameterNames: true
+  DeducedTypes: true
