@@ -20,7 +20,7 @@ typedef struct named_argument_definition {
 typedef struct arguments {
   char *path;
 
-  named_argument_definition *named_argument_defs;
+  const named_argument_definition *named_argument_defs;
   named_argument *named_arguments;
   size_t nnamed_argument_defs;
 
