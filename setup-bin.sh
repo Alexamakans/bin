@@ -27,9 +27,7 @@ cat > "$DIR/CMakeLists.txt" <<EOF
 
 file(GLOB_RECURSE SRC_FILES "*.c")
 
-add_executable($PROJ_NAME
-    ${SRC_FILES}
-)
+add_executable($PROJ_NAME \${SRC_FILES})
 
 # === Linking custom libraries (uncomment and modify as needed) ===
 # target_link_libraries($PROJ_NAME PRIVATE libA libB)

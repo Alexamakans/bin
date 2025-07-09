@@ -34,9 +34,7 @@ cat > "$DIR/CMakeLists.txt" <<EOF
 
 file(GLOB_RECURSE SRC_FILES "*.c")
 
-add_library($LIB_NAME STATIC
-    ${SRC_FILES}
-)
+add_library($LIB_NAME STATIC \${SRC_FILES})
 
 # Make headers accessible to projects that link this library
 target_include_directories($LIB_NAME PUBLIC \${CMAKE_CURRENT_SOURCE_DIR})
