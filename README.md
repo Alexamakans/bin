@@ -14,6 +14,9 @@ make
 ## My Versions
 
 ```
+$ cc --version
+cc (GCC) 15.1.1 20250521 (Red Hat 15.1.1-2)
+
 $ clangd --version
 clangd version 20.1.0 (https://github.com/llvm/llvm-project 24a30daaa559829ad079f2ff7f73eb4e18095f88)
 Features: linux+grpc
