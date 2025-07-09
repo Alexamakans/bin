@@ -1,139 +1,109 @@
 #include "karg.h"
 
+#include "karg_internals.h"
+
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define assert_null_terminated(x) assert(x[sizeof(x) - 1] == '\0');
-
-void parse_arguments(arguments *args, const int argc, char **argv) {
-  init_arguments(args, argc, argv);
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+bool karg_parse(arguments *args, const int argc, char **argv) {
+  init_arguments(args, argv[0]);
   if (argc == 1) {
-    return;
+    return true;
   }
 
   const char *flag_name;
-  // TODO: Map which args were consumed instead, put the rest into positional arguments?
-  int args_consumed = 0;
   for (int i = 1; i < argc; ++i) {
     const char *arg_str = argv[i];
-    assert_null_terminated(argv[i]);
     const size_t arg_len = strlen(argv[i]);
-    if (arg_len >= 2 && strncmp(arg_str, "--", 2) == 0) {
-      // named long flag
-      flag_name = argv[i] + 2;
-      assert(strlen(flag_name) > 0);
-      assert(i + 1 < argc);
-      ++i;
-      set_named_argument(args, flag_name, argv[i]);
-      args_consumed += 2;
-    } else if (arg_len >= 1 && arg_str[0] == '-') {
-      // short named argument
-      flag_name = argv[i] + 1;
-      assert(strlen(flag_name) == 1);
-      assert(i + 1 < argc);
-      ++i;
-      set_named_argument(args, flag_name, argv[i]);
-      args_consumed += 2;
-    } else {
-      continue;
-    }
-  }
-}
-
-void init_arguments(arguments *args, const int argc, char **argv) {
-  assert(args);
-  assert(argc > 0);
-  assert(args->path == NULL);
-  assert(args->named_arguments == NULL);
-  clone(&args->path, argv[0]);
-
-  args->named_arguments =
-      calloc(args->nnamed_arguments, sizeof(named_argument_definition));
-  for (size_t i = 0; i < args->nnamed_arguments; ++i) {
-    if (args->named_argument_defs[i].default_value == NULL) {
-      continue;
-    }
-    clone(&args->named_arguments[i].value,
-          args->named_argument_defs[i].default_value);
-  }
-}
-
-// find_flags returns -1 if no argument with a matching long/short name was
-// found.
-int64_t find_named_argument_index(arguments *args, const char *name) {
-  assert(args);
-  assert(name);
-  assert_null_terminated(name);
-  for (int64_t i = 0; i < (int64_t)args->nnamed_arguments; ++i) {
-    assert_null_terminated(args->named_argument_defs[i].name);
-    if (strcmp(args->named_argument_defs[i].name, name) == 0) {
-      return i;
-    }
-    if (strlen(name) == 1) {
-      if (args->named_argument_defs[i].short_name == name[0]) {
-        return i;
+    if (arg_len >= 1 && arg_str[0] == '-') {
+      // short/long named argument
+      if (arg_len >= 2 && arg_str[1] == '-') {
+        flag_name = argv[i] + 2;
+      } else {
+        flag_name = argv[i] + 1;
+        assert(strlen(flag_name) == 1);
       }
+      assert(i + 1 < argc);
+      ++i;
+      if (!set_named_argument(args, flag_name, argv[i])) {
+        debug_printf("failed setting flag %s to %s\n", arg_str, argv[i]);
+        return false;
+      }
+      debug_printf("flag { name: %s, value: %s }\n", flag_name, argv[i]);
+    } else {
+      printf("positional arguments are not implemented yet\n");
+      assert(false);
     }
   }
-  return -1;
+  return true;
 }
 
-named_argument *get_named_argument(arguments *args, const char *name) {
+void karg_free(arguments *args) {
+  if (args->positional_arguments) {
+    for (size_t i = 0; i < args->npositional_arguments; ++i) {
+      assert(args->positional_arguments[i].value);
+      free(args->positional_arguments[i].value);
+      args->positional_arguments[i].value = NULL;
+    }
+    free(args->positional_arguments);
+  }
+  args->positional_arguments = NULL;
+  args->npositional_arguments = 0;
+
+  if (args->named_arguments) {
+    for (size_t i = 0; i < args->nnamed_argument_defs; ++i) {
+      if (args->named_arguments[i].value) {
+        free(args->named_arguments[i].value);
+      }
+      args->named_arguments[i].value = NULL;
+    }
+    free(args->named_arguments);
+  }
+  args->named_arguments = NULL;
+
+  // named_argument_defs is owned by the caller so we just unassign it.
+  args->named_argument_defs = NULL;
+  args->nnamed_argument_defs = 0;
+
+  assert(args->path);
+  free(args->path);
+  args->path = NULL;
+}
+
+bool karg_string(const arguments *args, const char *name, char **value) {
   assert(args);
   assert(name);
-  assert_null_terminated(name);
-  int64_t arg_index = find_named_argument_index(args, name);
-  if (arg_index == -1) {
-    return NULL;
+  named_argument *arg = get_named_argument(args, name);
+  if (!arg) {
+    return false;
   }
-  return &args->named_arguments[arg_index];
+  *value = arg->value;
+  return true;
 }
 
-// set_named_argument returns -1 if no argument with a matching long/short name
-// was found. NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-int set_named_argument(arguments *args, const char *name, const char *value) {
-  assert(args);
-  assert_null_terminated(name);
-  assert_null_terminated(value);
-  int64_t index = find_named_argument_index(args, name);
-  if (index == -1) {
-    return -1;
+bool karg_string_alloc(const arguments *args, const char *name, char **value) {
+  if (!karg_string(args, name, value)) {
+    return false;
   }
-  if (strcmp(args->named_argument_defs->name, name) == 0) {
-    if (args->named_arguments[index].value != NULL) {
-      free(args->named_arguments[index].value);
-      args->named_arguments[index].value = NULL;
-    }
-    assert(args->named_arguments[index].value == NULL);
-    clone(&args->named_arguments[index].value, value);
-  }
-  return 0;
+  clone(value, *value);
+  return true;
 }
 
-positional_argument *get_positional_argument(arguments *args, size_t index) {
-  assert(args);
-  assert(index < args->npositional_arguments);
-  return &args->positional_arguments[index];
-}
-
-void set_positional_argument(arguments *args, size_t index, const char *value) {
-  assert(args);
-  assert(index < args->npositional_arguments);
-  if (args->positional_arguments[index].value != NULL) {
-    free(args->positional_arguments[index].value);
-    args->positional_arguments[index].value = NULL;
+bool karg_long(const arguments *args, const char *name, long *value) {
+  char *str;
+  if (!karg_string(args, name, &str)) {
+    return false;
   }
-  assert(args->positional_arguments[index].value == NULL);
-  clone(&args->named_arguments[index].value, value);
-}
 
-void clone(char **dest, const char *src) {
-  assert(dest);
-  assert(src);
-  assert_null_terminated(src);
-  *dest = malloc(sizeof(char) * strlen(src));
-  assert(*dest);
-  assert_null_terminated(*dest);
+  const int base = 10;
+  char *end;
+  *value = strtol(str, &end, base);
+  if (end == str || *end != '\0') {
+    return false;
+  }
+  return true;
 }

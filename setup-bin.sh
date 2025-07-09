@@ -25,8 +25,10 @@ EOF
 cat > "$DIR/CMakeLists.txt" <<EOF
 # Build executable: $PROJ_NAME
 
+file(GLOB_RECURSE SRC_FILES "*.c")
+
 add_executable($PROJ_NAME
-    main.c
+    ${SRC_FILES}
 )
 
 # === Linking custom libraries (uncomment and modify as needed) ===

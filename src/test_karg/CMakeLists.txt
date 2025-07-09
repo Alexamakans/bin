@@ -1,8 +1,7 @@
 # Build executable: test_karg
 
-add_executable(test_karg
-    main.c
-)
+file(GLOB_RECURSE SRC_FILES "*.c")
+add_executable(test_karg ${SRC_FILES})
 
 # === Linking custom libraries (uncomment and modify as needed) ===
 target_link_libraries(test_karg PRIVATE karg)

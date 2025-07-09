@@ -31,8 +31,11 @@ EOF
 cat > "$DIR/CMakeLists.txt" <<EOF
 # Build static library: $LIB_NAME
 
+
+file(GLOB_RECURSE SRC_FILES "*.c")
+
 add_library($LIB_NAME STATIC
-    $LIB_NAME.c
+    ${SRC_FILES}
 )
 
 # Make headers accessible to projects that link this library
