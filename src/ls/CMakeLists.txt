@@ -8,6 +8,7 @@ add_executable(ls ${SRC_FILES})
 target_link_libraries(
   ls
   PRIVATE karg
+          libpasswd
           # -lm for math.h
           -lm)
 

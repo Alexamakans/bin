@@ -15,13 +15,17 @@
 #include <dirent.h>
 
 #include <karg.h>
+#include <libpasswd.h>
 
 typedef struct direntstat {
   struct dirent entry;
   struct stat stat;
+  char *user_name;
+  char *group_name;
 } direntstat;
 
-direntstat *list_files(const char *path, size_t *nfiles);
+direntstat *list_files(const char *path, size_t *nfiles,
+                       const passwdinfo *passwdinfo);
 char *to_octal(unsigned int value);
 size_t count_digits(double value);
 bool xstat(const char *path, struct dirent *entry, struct stat *statbuf);
@@ -48,13 +52,16 @@ int main(int argc, char **argv) {
   }
 
   size_t nfiles;
-  direntstat *files = list_files(path, &nfiles);
+
+  passwdinfo info;
+  passwdinfo_create(&info);
+  direntstat *files = list_files(path, &nfiles, &info);
+  passwdinfo_destroy(&info);
   if (files == NULL) {
     fprintf(stderr, "failed listing files in '%s'\n", path);
     return 1;
   }
 
-  char *fmt = make_fmt_string(files, nfiles);
   long total_blocks = 0;
   for (size_t i = 0; i < nfiles; ++i) {
     // TODO: Custom block size like ls has.
@@ -65,11 +72,12 @@ int main(int argc, char **argv) {
   }
   printf("total %ld\n", total_blocks);
 
+  char *fmt = make_fmt_string(files, nfiles);
   for (size_t i = 0; i < nfiles; ++i) {
     direntstat *file = &files[i];
 
     printf(fmt, file->stat.st_mode, file->stat.st_nlink, file->stat.st_ino,
-           file->stat.st_uid, file->stat.st_gid, file->stat.st_size,
+           file->user_name, file->group_name, file->stat.st_size,
            file->entry.d_name);
   }
   free(fmt);
@@ -78,9 +86,11 @@ int main(int argc, char **argv) {
   karg_free(&args);
 }
 
-direntstat *list_files(const char *path, size_t *nfiles) {
+direntstat *list_files(const char *path, size_t *nfiles,
+                       const passwdinfo *passwdinfo) {
   assert(path);
   assert(nfiles);
+  assert(passwdinfo);
   *nfiles = 0;
 
   DIR *dir = opendir(path);
@@ -129,9 +139,25 @@ direntstat *list_files(const char *path, size_t *nfiles) {
       perror("stat");
     }
 #endif // _DIRENT_HAVE_D_TYPE
+    entries->entry = *entry;
+    size_t index;
+    if (!passwd_find_index_by_uid(passwdinfo, entries->stat.st_uid, &index)) {
+      fprintf(stderr, "failed getting user name for file: %s\n", real_path);
+    } else {
+      char *name = passwdinfo->names[index];
+      entries->user_name = calloc(1, strlen(name) + 1);
+      strcpy(entries->user_name, name);
+    }
+    if (!passwd_find_index_by_gid(passwdinfo, entries->stat.st_gid, &index)) {
+      fprintf(stderr, "failed getting user name for file: %s\n", real_path);
+    } else {
+      char *name = passwdinfo->names[index];
+      entries->group_name = calloc(1, strlen(name) + 1);
+      strcpy(entries->group_name, name);
+    }
+
     free(real_path);
 
-    entries->entry = *entry;
     ++entries;
   }
   closedir(dir);
@@ -179,10 +205,10 @@ char *make_fmt_string(direntstat *files, size_t nfiles) {
     width = count_digits((double)files[i].stat.st_ino);
     ino_width = ino_width > width ? ino_width : width;
 
-    width = count_digits((double)files[i].stat.st_uid);
+    width = strlen(files[i].user_name);
     uid_width = uid_width > width ? uid_width : width;
 
-    width = count_digits((double)files[i].stat.st_gid);
+    width = strlen(files[i].group_name);
     gid_width = gid_width > width ? gid_width : width;
 
     width = count_digits((double)files[i].stat.st_size);
@@ -190,7 +216,8 @@ char *make_fmt_string(direntstat *files, size_t nfiles) {
   }
 
   size_t fmt_len =
-      1 + snprintf(NULL, 0, "%%06o %%%zulu %%%zulu %%%zuu %%%zuu %%%zuld %%s\n",
+      // mode, link count, ino width, uid width, gid width, size width, filename
+      1 + snprintf(NULL, 0, "%%06o %%%zulu %%%zulu %%%zus %%%zus %%%zuld %%s\n",
                    link_count_width, ino_width, uid_width, gid_width,
                    size_width);
   char *fmt = malloc(fmt_len);
@@ -198,7 +225,7 @@ char *make_fmt_string(direntstat *files, size_t nfiles) {
     fprintf(stderr, "failed to allocate memory for fmt\n");
     abort();
   }
-  snprintf(fmt, fmt_len, "%%06o %%%zulu %%%zulu %%%zuu %%%zuu %%%zuld %%s\n",
+  snprintf(fmt, fmt_len, "%%06o %%%zulu %%%zulu %%%zus %%%zus %%%zuld %%s\n",
            link_count_width, ino_width, uid_width, gid_width, size_width);
   return fmt;
 }
