@@ -1,14 +1,31 @@
 #include <assert.h>
-#include <dirent.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
+// TODO: format st_mode -> drwxrwxrws.
+// TODO: Translate uid and gid to names by parsing /etc/passwd
+// TODO: Output the last modified time as a human readable date
+// TODO: Sorting
+
+#define __USE_MISC
+#include <dirent.h>
+
 #include <karg.h>
 
-bool list_files(const char *path);
+typedef struct direntstat {
+  struct dirent entry;
+  struct stat stat;
+} direntstat;
+
+direntstat *list_files(const char *path, size_t *nfiles);
+char *to_octal(unsigned int value);
+size_t count_digits(double value);
+bool xstat(const char *path, struct dirent *entry, struct stat *statbuf);
+char *make_fmt_string(direntstat *files, size_t nfiles);
 
 int main(int argc, char **argv) {
   const named_argument_definition arg_defs[1] = {
@@ -30,21 +47,46 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (!list_files(path)) {
+  size_t nfiles;
+  direntstat *files = list_files(path, &nfiles);
+  if (files == NULL) {
     fprintf(stderr, "failed listing files in '%s'\n", path);
     return 1;
   }
 
+  char *fmt = make_fmt_string(files, nfiles);
+  long total_blocks = 0;
+  for (size_t i = 0; i < nfiles; ++i) {
+    // TODO: Custom block size like ls has.
+    //
+    // Currently using their default, which is 1024.
+    // st_blocks is how many 512-byte blocks there are, so we divide by 2.
+    total_blocks += files[i].stat.st_blocks / 2;
+  }
+  printf("total %ld\n", total_blocks);
+
+  for (size_t i = 0; i < nfiles; ++i) {
+    direntstat *file = &files[i];
+
+    printf(fmt, file->stat.st_mode, file->stat.st_nlink, file->stat.st_ino,
+           file->stat.st_uid, file->stat.st_gid, file->stat.st_size,
+           file->entry.d_name);
+  }
+  free(fmt);
+
   karg_free(&args);
 }
 
-bool list_files(const char *path) {
+direntstat *list_files(const char *path, size_t *nfiles) {
   assert(path);
+  assert(nfiles);
+  *nfiles = 0;
 
   DIR *dir = opendir(path);
   if (dir == NULL) {
-    perror("unable to open directory");
-    return false;
+    fprintf(stderr, "failed to open directory: %s\n", path);
+    perror("opendir");
+    return NULL;
   }
 
   struct dirent *entry;
@@ -52,32 +94,110 @@ bool list_files(const char *path) {
     if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
       continue;
     }
+    ++(*nfiles);
+  }
+  rewinddir(dir);
+
+  direntstat *entries = calloc(*nfiles, sizeof(struct direntstat));
+  direntstat *result = entries;
+  if (entries == NULL) {
+    fprintf(stderr, "failed to allocate memory for entries\n");
+    abort();
+  }
+  while ((entry = readdir(dir)) != NULL) {
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+      continue;
+    }
 
     const size_t real_path_len =
         1 + snprintf(NULL, 0, "%s/%s", path, entry->d_name);
-    char *real_path = malloc(real_path_len);
+    char *real_path = calloc(real_path_len, 1);
+    if (real_path == NULL) {
+      fprintf(stderr, "failed to allocate memory for real_path\n");
+      abort();
+    }
     snprintf(real_path, real_path_len, "%s/%s", path, entry->d_name);
 
-    //    struct stat statbuf;
-    // #ifdef _DIRENT_HAVE_D_TYPE
-    //    if (S_ISDIR(entry->d_type) || S_ISREG(entry->d_type)) {
-    //      if (stat(real_path, &statbuf) != 0) {
-    //        fprintf(stderr, "failed to stat entry: %s\n", entry->d_name);
-    //        perror("stat");
-    //        return false;
-    //      }
-    //    }
-    // #else
-    //    if (stat(real_path, &statbuf) != 0) {
-    //      fprintf(stderr, "failed to stat entry: %s\n", entry->d_name);
-    //      perror("stat");
-    //      continue;
-    //    }
-    // #endif // _DIRENT_HAVE_D_TYPE
+#ifdef _DIRENT_HAVE_D_TYPE
+    if (!xstat(real_path, entry, &entries->stat)) {
+      fprintf(stderr, "failed to xstat entry: %s\n", entry->d_name);
+    }
+#else
+    if (stat(real_path, &statbuf) != 0) {
+      fprintf(stderr, "failed to stat entry: %s\n", entry->d_name);
+      perror("stat");
+    }
+#endif // _DIRENT_HAVE_D_TYPE
+    free(real_path);
 
-    printf("%s\n", entry->d_name);
+    entries->entry = *entry;
+    ++entries;
+  }
+  closedir(dir);
+  return result;
+}
+
+size_t count_digits(const double value) {
+  if (value > 0) {
+    return (size_t)log10(value) + 1;
+  }
+  if (value < 0) {
+    return (size_t)log10(-value) + 1;
+  }
+  return 1;
+}
+
+bool xstat(const char *path, struct dirent *entry, struct stat *statbuf) {
+  if (entry->d_type == DT_DIR || entry->d_type == DT_REG) {
+    if (stat(path, statbuf) != 0) {
+      perror("stat");
+      return false;
+    }
+  } else if (entry->d_type == DT_UNKNOWN || entry->d_type == DT_LNK) {
+    if (lstat(path, statbuf) != 0) {
+      perror("lstat");
+      return false;
+    }
+  } else {
+    fprintf(stderr, "unaccounted for type: %cu\n", entry->d_type);
+    return false;
+  }
+  return true;
+}
+
+char *make_fmt_string(direntstat *files, size_t nfiles) {
+  size_t link_count_width = 0;
+  size_t ino_width = 0;
+  size_t uid_width = 0;
+  size_t gid_width = 0;
+  size_t size_width = 0;
+  for (size_t i = 0; i < nfiles; ++i) {
+    size_t width = count_digits((double)files[i].stat.st_nlink);
+    link_count_width = link_count_width > width ? link_count_width : width;
+
+    width = count_digits((double)files[i].stat.st_ino);
+    ino_width = ino_width > width ? ino_width : width;
+
+    width = count_digits((double)files[i].stat.st_uid);
+    uid_width = uid_width > width ? uid_width : width;
+
+    width = count_digits((double)files[i].stat.st_gid);
+    gid_width = gid_width > width ? gid_width : width;
+
+    width = count_digits((double)files[i].stat.st_size);
+    size_width = size_width > width ? size_width : width;
   }
 
-  closedir(dir);
-  return true;
+  size_t fmt_len =
+      1 + snprintf(NULL, 0, "%%06o %%%zulu %%%zulu %%%zuu %%%zuu %%%zuld %%s\n",
+                   link_count_width, ino_width, uid_width, gid_width,
+                   size_width);
+  char *fmt = malloc(fmt_len);
+  if (fmt == NULL) {
+    fprintf(stderr, "failed to allocate memory for fmt\n");
+    abort();
+  }
+  snprintf(fmt, fmt_len, "%%06o %%%zulu %%%zulu %%%zuu %%%zuu %%%zuld %%s\n",
+           link_count_width, ino_width, uid_width, gid_width, size_width);
+  return fmt;
 }
