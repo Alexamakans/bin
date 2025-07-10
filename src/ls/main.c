@@ -79,6 +79,10 @@ int main(int argc, char **argv) {
     printf(fmt, file->stat.st_mode, file->stat.st_nlink, file->stat.st_ino,
            file->user_name, file->group_name, file->stat.st_size,
            file->entry.d_name);
+    free(file->group_name);
+    file->group_name = NULL;
+    free(file->user_name);
+    file->user_name = NULL;
   }
   free(fmt);
   free(files);

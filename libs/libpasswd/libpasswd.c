@@ -18,13 +18,13 @@ bool passwdinfo_create(passwdinfo *info) {
     return false;
   }
   char **lines = (char **)calloc(num_lines, sizeof(char *));
-  char **lines_start = lines;
   size_t line_len;
-  while (next(&reader, lines, &line_len)) {
-    ++lines;
+  for (size_t i = 0; i < num_lines; ++i) {
+    if (!next(&reader, &lines[i], &line_len)) {
+      fprintf(stderr, "error reading line %zu\n", i);
+      return false;
+    }
   }
-  assert((lines - lines_start) == (long)num_lines);
-  lines = lines_start;
 
   deinit_reader(&reader);
 
@@ -47,6 +47,8 @@ bool passwdinfo_create(passwdinfo *info) {
     info->group_ids[i] = (uint32_t)strtoul(token, NULL, gid_base);
     free(line);
   }
+
+  free((void *)lines);
 
   info->nentries = num_lines;
 
@@ -101,4 +103,16 @@ void passwdinfo_destroy(passwdinfo *info) {
   assert(info->group_ids);
   assert(info->user_ids);
   assert(info->names);
+
+  free(info->group_ids);
+  info->group_ids = NULL;
+  free(info->user_ids);
+  info->user_ids = NULL;
+  for (size_t i = 0; i < info->nentries; ++i) {
+    free(info->names[i]);
+    info->names[i] = NULL;
+  }
+  free((void *)info->names);
+  info->names = NULL;
+  info->nentries = 0;
 }
