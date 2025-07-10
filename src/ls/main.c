@@ -73,6 +73,7 @@ int main(int argc, char **argv) {
            file->entry.d_name);
   }
   free(fmt);
+  free(files);
 
   karg_free(&args);
 }
