@@ -7,7 +7,7 @@ git clone https://github.com/Alexamakans/bin.git
 ```sh
 cd bin
 mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Debug
+cmake ..
 make
 ```
 
