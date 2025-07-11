@@ -7,8 +7,7 @@ add_executable(ls ${SRC_FILES})
 # === Linking custom libraries (uncomment and modify as needed) ===
 target_link_libraries(
   ls
-  PRIVATE karg
-          libpasswd
+  PRIVATE karg libpasswd
           # -lm for math.h
           -lm)
 
