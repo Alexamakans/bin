@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 // TODO: format st_mode -> drwxrwxrws.
 // TODO: Translate uid and gid to names by parsing /etc/passwd
@@ -30,6 +31,8 @@ char *to_octal(unsigned int value);
 size_t count_digits(double value);
 bool xstat(const char *path, struct dirent *entry, struct stat *statbuf);
 char *make_fmt_string(direntstat *files, size_t nfiles);
+// allocates memory if *presult is NULL
+void make_mode_string(unsigned int mode, char **presult);
 
 int main(int argc, char **argv) {
   const named_argument_definition arg_defs[1] = {
@@ -73,10 +76,12 @@ int main(int argc, char **argv) {
   printf("total %ld\n", total_blocks);
 
   char *fmt = make_fmt_string(files, nfiles);
+  char *mode_string = NULL;
   for (size_t i = 0; i < nfiles; ++i) {
     direntstat *file = &files[i];
 
-    printf(fmt, file->stat.st_mode, file->stat.st_nlink, file->stat.st_ino,
+    make_mode_string(file->stat.st_mode, &mode_string);
+    printf(fmt, mode_string, file->stat.st_nlink, file->stat.st_ino,
            file->user_name, file->group_name, file->stat.st_size,
            file->entry.d_name);
     free(file->group_name);
@@ -84,6 +89,7 @@ int main(int argc, char **argv) {
     free(file->user_name);
     file->user_name = NULL;
   }
+  free(mode_string);
   free(fmt);
   free(files);
 
@@ -220,8 +226,9 @@ char *make_fmt_string(direntstat *files, size_t nfiles) {
   }
 
   size_t fmt_len =
-      // mode, link count, ino width, uid width, gid width, size width, filename
-      1 + snprintf(NULL, 0, "%%06o %%%zulu %%%zulu %%%zus %%%zus %%%zuld %%s\n",
+      // mode string, link count, ino width, uid width, gid width, size width,
+      // filename
+      1 + snprintf(NULL, 0, "%%06s %%%zulu %%%zulu %%%zus %%%zus %%%zuld %%s\n",
                    link_count_width, ino_width, uid_width, gid_width,
                    size_width);
   char *fmt = malloc(fmt_len);
@@ -229,7 +236,141 @@ char *make_fmt_string(direntstat *files, size_t nfiles) {
     fprintf(stderr, "failed to allocate memory for fmt\n");
     abort();
   }
-  snprintf(fmt, fmt_len, "%%06o %%%zulu %%%zulu %%%zus %%%zus %%%zuld %%s\n",
+  snprintf(fmt, fmt_len, "%%06s %%%zulu %%%zulu %%%zus %%%zus %%%zuld %%s\n",
            link_count_width, ino_width, uid_width, gid_width, size_width);
   return fmt;
+}
+
+void make_mode_string(const unsigned int mode, char **presult) {
+  assert(presult);
+
+  static const size_t mode_num_chars = 11;
+  static const size_t octal_digit_bit_size = 3;
+  if (*presult == NULL) {
+    *presult = calloc(mode_num_chars + 1, sizeof(char));
+  }
+  char *result = *presult;
+
+  static const size_t file_type_bit_offset = 4 * octal_digit_bit_size;
+  const char file_type_octal = (char)((mode >> file_type_bit_offset) & 017);
+  size_t index = 0;
+  switch (file_type_octal) {
+  case DT_REG:
+    result[index++] = '-';
+    break;
+  case DT_DIR:
+    result[index++] = 'd';
+    break;
+  case DT_LNK:
+    result[index++] = 'l';
+    break;
+  case DT_FIFO:
+    result[index++] = 'p';
+    break;
+  case DT_BLK:
+    result[index++] = 'b';
+    break;
+  case DT_CHR:
+    result[index++] = 'c';
+    break;
+  case DT_SOCK:
+    result[index++] = 's';
+    break;
+  default:
+    result[index++] = '?';
+  }
+
+#define HAS_READ(x) (((x) & ~04) != (x))
+#define HAS_WRITE(x) (((x) & ~02) != (x))
+#define HAS_EXEC(x) (((x) & ~01) != (x))
+
+#define STICKY_MASK 01
+#define SETUID_MASK 02
+#define SETGID_MASK 04
+  static const size_t special_flag_bit_offset = 3 * octal_digit_bit_size;
+  const bool is_sticky = (mode >> special_flag_bit_offset) & STICKY_MASK;
+  const bool is_setuid = (mode >> special_flag_bit_offset) & SETUID_MASK;
+  const bool is_setgid = (mode >> special_flag_bit_offset) & SETGID_MASK;
+
+  static const size_t owner_perms_bit_offset = 2 * octal_digit_bit_size;
+  const char owner_perms_octal = (char)((mode >> owner_perms_bit_offset) & 07);
+  if (HAS_READ(owner_perms_octal)) {
+    result[index++] = 'r';
+  } else {
+    result[index++] = '-';
+  }
+  if (HAS_WRITE(owner_perms_octal)) {
+    result[index++] = 'w';
+  } else {
+    result[index++] = '-';
+  }
+  if (HAS_EXEC(owner_perms_octal)) {
+    if (is_setuid) {
+      result[index++] = 's';
+    } else {
+      result[index++] = 'x';
+    }
+  } else if (is_setuid) {
+    result[index++] = 'S';
+  } else {
+    result[index++] = '-';
+  }
+
+  static const size_t group_perms_bit_offset = 1 * octal_digit_bit_size;
+  const char group_perms_octal = (char)((mode >> group_perms_bit_offset) & 07);
+  if (HAS_READ(group_perms_octal)) {
+    result[index++] = 'r';
+  } else {
+    result[index++] = '-';
+  }
+  if (HAS_WRITE(group_perms_octal)) {
+    result[index++] = 'w';
+  } else {
+    result[index++] = '-';
+  }
+  if (HAS_EXEC(group_perms_octal)) {
+    if (is_setgid) {
+      result[index++] = 's';
+    } else {
+      result[index++] = 'x';
+    }
+  } else if (is_setgid) {
+    result[index++] = 'S';
+  } else {
+    result[index++] = '-';
+  }
+
+  static const size_t everyone_perms_bit_offset = 0 * octal_digit_bit_size;
+  const char everyone_perms_octal =
+      (char)((mode >> everyone_perms_bit_offset) & 07);
+  if (HAS_READ(everyone_perms_octal)) {
+    result[index++] = 'r';
+  } else {
+    result[index++] = '-';
+  }
+  if (HAS_WRITE(everyone_perms_octal)) {
+    result[index++] = 'w';
+  } else {
+    result[index++] = '-';
+  }
+  if (HAS_EXEC(everyone_perms_octal)) {
+    if (is_sticky) {
+      result[index++] = 't';
+    } else {
+      result[index++] = 'x';
+    }
+  } else if (is_sticky) {
+    result[index++] = 'T';
+  } else {
+    result[index++] = '-';
+  }
+
+  result[index++] = '\0';
+#undef HAS_READ
+#undef HAS_WRITE
+#undef HAS_EXEC
+
+#undef STICKY_MASK
+#undef SETUID_MASK
+#undef SETGID_MASK
 }
