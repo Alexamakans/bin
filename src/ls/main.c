@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -35,6 +36,8 @@ char *make_fmt_string(direntstat *files, size_t nfiles);
 void make_mode_string(unsigned int mode, char **presult);
 
 int main(int argc, char **argv) {
+  tzset();
+
   const named_argument_definition arg_defs[1] = {
       {'p', "path", "."},
   };
@@ -77,17 +80,38 @@ int main(int argc, char **argv) {
 
   char *fmt = make_fmt_string(files, nfiles);
   char *mode_string = NULL;
+
+  struct tm timedata;
+  memset(&timedata, 0, sizeof(timedata));
+  const size_t last_modified_max_len = 20;
+  char *last_modified = calloc(last_modified_max_len, sizeof(char));
+  if (last_modified == NULL) {
+    fprintf(stderr, "failed to allocate memory for last modified string\n");
+    return 1;
+  }
+
   for (size_t i = 0; i < nfiles; ++i) {
     direntstat *file = &files[i];
 
+    struct timespec mtim = file->stat.st_mtim;
+    if (localtime_r(&mtim.tv_sec, &timedata) == NULL) {
+      fprintf(stderr, "failed to format last modified time into date\n");
+      return 1;
+    }
+
     make_mode_string(file->stat.st_mode, &mode_string);
-    printf(fmt, mode_string, file->stat.st_nlink, file->stat.st_ino,
-           file->user_name, file->group_name, file->stat.st_size,
+    strftime(last_modified, last_modified_max_len, "%b %e %H:%M", &timedata);
+    printf(fmt, mode_string, file->stat.st_nlink, file->user_name,
+           file->group_name, file->stat.st_size, last_modified,
            file->entry.d_name);
     free(file->group_name);
     file->group_name = NULL;
     free(file->user_name);
     file->user_name = NULL;
+  }
+  if (last_modified != NULL) {
+    free(last_modified);
+    last_modified = NULL;
   }
   free(mode_string);
   free(fmt);
@@ -204,16 +228,12 @@ bool xstat(const char *path, struct dirent *entry, struct stat *statbuf) {
 
 char *make_fmt_string(direntstat *files, size_t nfiles) {
   size_t link_count_width = 0;
-  size_t ino_width = 0;
   size_t uid_width = 0;
   size_t gid_width = 0;
   size_t size_width = 0;
   for (size_t i = 0; i < nfiles; ++i) {
     size_t width = count_digits((double)files[i].stat.st_nlink);
     link_count_width = link_count_width > width ? link_count_width : width;
-
-    width = count_digits((double)files[i].stat.st_ino);
-    ino_width = ino_width > width ? ino_width : width;
 
     width = strlen(files[i].user_name);
     uid_width = uid_width > width ? uid_width : width;
@@ -226,34 +246,24 @@ char *make_fmt_string(direntstat *files, size_t nfiles) {
   }
 
   size_t fmt_len =
-      // mode string, link count, ino width, uid width, gid width, size width,
-      // filename
-      1 + snprintf(NULL, 0, "%%06s %%%zulu %%%zulu %%%zus %%%zus %%%zuld %%s\n",
-                   link_count_width, ino_width, uid_width, gid_width,
-                   size_width);
+      // mode string, link count, uid width, gid width, size width,
+      // last modified, filename
+      1 + snprintf(NULL, 0, "%%06s %%%zulu %%%zus %%%zus %%%zuld %%s %%s\n",
+                   link_count_width, uid_width, gid_width, size_width);
   char *fmt = malloc(fmt_len);
   if (fmt == NULL) {
     fprintf(stderr, "failed to allocate memory for fmt\n");
     abort();
   }
-  snprintf(fmt, fmt_len, "%%06s %%%zulu %%%zulu %%%zus %%%zus %%%zuld %%s\n",
-           link_count_width, ino_width, uid_width, gid_width, size_width);
+  snprintf(fmt, fmt_len, "%%06s %%%zulu %%%zus %%%zus %%%zuld %%s %%s\n",
+           link_count_width, uid_width, gid_width, size_width);
   return fmt;
 }
 
-void make_mode_string(const unsigned int mode, char **presult) {
-  assert(presult);
-
-  static const size_t mode_num_chars = 11;
-  static const size_t octal_digit_bit_size = 3;
-  if (*presult == NULL) {
-    *presult = calloc(mode_num_chars + 1, sizeof(char));
-  }
-  char *result = *presult;
-
-  static const size_t file_type_bit_offset = 4 * octal_digit_bit_size;
-  const char file_type_octal = (char)((mode >> file_type_bit_offset) & 017);
-  size_t index = 0;
+// fill_file_type advances the index and returns it.
+size_t fill_file_type(char *result, size_t index, const unsigned int mode,
+                      const size_t bit_offset) {
+  const char file_type_octal = (char)((mode >> bit_offset) & 017);
   switch (file_type_octal) {
   case DT_REG:
     result[index++] = '-';
@@ -279,10 +289,59 @@ void make_mode_string(const unsigned int mode, char **presult) {
   default:
     result[index++] = '?';
   }
+  return index;
+}
 
+// fill_rwx advances the index and returns it.
+size_t fill_rwx(char *result, size_t index, const unsigned int mode,
+                const size_t bit_offset, const bool special_condition,
+                const char special_has_exec_char_lowercase) {
+  assert(islower(special_has_exec_char_lowercase));
 #define HAS_READ(x) (((x) & ~04) != (x))
 #define HAS_WRITE(x) (((x) & ~02) != (x))
 #define HAS_EXEC(x) (((x) & ~01) != (x))
+  const char perms = (char)((mode >> bit_offset) & 07);
+  if (HAS_READ(perms)) {
+    result[index++] = 'r';
+  } else {
+    result[index++] = '-';
+  }
+  if (HAS_WRITE(perms)) {
+    result[index++] = 'w';
+  } else {
+    result[index++] = '-';
+  }
+  if (HAS_EXEC(perms)) {
+    result[index++] = 'x';
+  } else {
+    result[index++] = '-';
+  }
+  if (special_condition) {
+    const size_t exec_index = index - 1;
+    if (result[exec_index] == 'x') {
+      result[exec_index] = special_has_exec_char_lowercase;
+    } else {
+      result[exec_index] = (char)toupper(special_has_exec_char_lowercase);
+    }
+  }
+  return index;
+#undef HAS_READ
+#undef HAS_WRITE
+#undef HAS_EXEC
+}
+
+void make_mode_string(const unsigned int mode, char **presult) {
+  assert(presult);
+
+  const size_t mode_num_chars = 11;
+  static const size_t octal_digit_bit_size = 3;
+  if (*presult == NULL) {
+    *presult = calloc(mode_num_chars + 1, sizeof(char));
+  }
+  char *result = *presult;
+
+  static const size_t file_type_bit_offset = 4 * octal_digit_bit_size;
+  size_t index = fill_file_type(result, 0, mode, file_type_bit_offset);
 
 #define STICKY_MASK 01
 #define SETUID_MASK 02
@@ -292,83 +351,13 @@ void make_mode_string(const unsigned int mode, char **presult) {
   const bool is_setuid = (mode >> special_flag_bit_offset) & SETUID_MASK;
   const bool is_setgid = (mode >> special_flag_bit_offset) & SETGID_MASK;
 
-  static const size_t owner_perms_bit_offset = 2 * octal_digit_bit_size;
-  const char owner_perms_octal = (char)((mode >> owner_perms_bit_offset) & 07);
-  if (HAS_READ(owner_perms_octal)) {
-    result[index++] = 'r';
-  } else {
-    result[index++] = '-';
-  }
-  if (HAS_WRITE(owner_perms_octal)) {
-    result[index++] = 'w';
-  } else {
-    result[index++] = '-';
-  }
-  if (HAS_EXEC(owner_perms_octal)) {
-    if (is_setuid) {
-      result[index++] = 's';
-    } else {
-      result[index++] = 'x';
-    }
-  } else if (is_setuid) {
-    result[index++] = 'S';
-  } else {
-    result[index++] = '-';
-  }
-
-  static const size_t group_perms_bit_offset = 1 * octal_digit_bit_size;
-  const char group_perms_octal = (char)((mode >> group_perms_bit_offset) & 07);
-  if (HAS_READ(group_perms_octal)) {
-    result[index++] = 'r';
-  } else {
-    result[index++] = '-';
-  }
-  if (HAS_WRITE(group_perms_octal)) {
-    result[index++] = 'w';
-  } else {
-    result[index++] = '-';
-  }
-  if (HAS_EXEC(group_perms_octal)) {
-    if (is_setgid) {
-      result[index++] = 's';
-    } else {
-      result[index++] = 'x';
-    }
-  } else if (is_setgid) {
-    result[index++] = 'S';
-  } else {
-    result[index++] = '-';
-  }
-
-  static const size_t everyone_perms_bit_offset = 0 * octal_digit_bit_size;
-  const char everyone_perms_octal =
-      (char)((mode >> everyone_perms_bit_offset) & 07);
-  if (HAS_READ(everyone_perms_octal)) {
-    result[index++] = 'r';
-  } else {
-    result[index++] = '-';
-  }
-  if (HAS_WRITE(everyone_perms_octal)) {
-    result[index++] = 'w';
-  } else {
-    result[index++] = '-';
-  }
-  if (HAS_EXEC(everyone_perms_octal)) {
-    if (is_sticky) {
-      result[index++] = 't';
-    } else {
-      result[index++] = 'x';
-    }
-  } else if (is_sticky) {
-    result[index++] = 'T';
-  } else {
-    result[index++] = '-';
-  }
-
+  index =
+      fill_rwx(result, index, mode, 2 * octal_digit_bit_size, is_setuid, 's');
+  index =
+      fill_rwx(result, index, mode, 1 * octal_digit_bit_size, is_setgid, 's');
+  index =
+      fill_rwx(result, index, mode, 0 * octal_digit_bit_size, is_sticky, 't');
   result[index++] = '\0';
-#undef HAS_READ
-#undef HAS_WRITE
-#undef HAS_EXEC
 
 #undef STICKY_MASK
 #undef SETUID_MASK
