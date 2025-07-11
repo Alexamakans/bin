@@ -30,12 +30,13 @@ bool karg_parse(arguments *args, const int argc, char **argv) {
       assert(i + 1 < argc);
       ++i;
       if (!set_named_argument(args, flag_name, argv[i])) {
-        debug_printf("failed setting flag %s to %s\n", arg_str, argv[i]);
+        fprintf(stderr, "failed setting flag %s to %s\n", arg_str, argv[i]);
         return false;
       }
       debug_printf("flag { name: %s, value: %s }\n", flag_name, argv[i]);
     } else {
-      printf("positional arguments are not implemented yet\n");
+      fprintf(stderr, "positional arguments are not implemented yet: %s\n",
+              arg_str);
       assert(false);
     }
   }
