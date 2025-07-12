@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 
@@ -28,12 +29,14 @@ typedef struct direntstat {
 
 direntstat *list_files(const char *path, size_t *nfiles,
                        const passwdinfo *passwdinfo);
-char *to_octal(unsigned int value);
 size_t count_digits(double value);
 bool xstat(const char *path, struct dirent *entry, struct stat *statbuf);
 char *make_fmt_string(direntstat *files, size_t nfiles);
 // allocates memory if *presult is NULL
 void make_mode_string(unsigned int mode, char **presult);
+
+// NOLINTNEXTLINE(readability-identifier-length)
+int default_sort(const void *va, const void *vb);
 
 int main(int argc, char **argv) {
   tzset();
@@ -62,6 +65,7 @@ int main(int argc, char **argv) {
   passwdinfo info;
   passwdinfo_create(&info);
   direntstat *files = list_files(path, &nfiles, &info);
+  qsort(files, nfiles, sizeof(direntstat), default_sort);
   passwdinfo_destroy(&info);
   if (files == NULL) {
     fprintf(stderr, "failed listing files in '%s'\n", path);
@@ -362,4 +366,22 @@ void make_mode_string(const unsigned int mode, char **presult) {
 #undef STICKY_MASK
 #undef SETUID_MASK
 #undef SETGID_MASK
+}
+
+// NOLINTBEGIN(readability-identifier-length)
+int default_sort(const void *va, const void *vb) {
+  const direntstat *a = (direntstat *)va;
+  const direntstat *b = (direntstat *)vb;
+  // NOLINTEND(readability-identifier-length)
+  const char *simplified_name_a = a->entry.d_name;
+  while (simplified_name_a[0] == '.') {
+    ++simplified_name_a;
+  }
+  const char *simplified_name_b = b->entry.d_name;
+  while (simplified_name_b[0] == '.') {
+    ++simplified_name_b;
+  }
+  // Revert case change
+  int cmp = strcasecmp(simplified_name_a, simplified_name_b);
+  return cmp;
 }
