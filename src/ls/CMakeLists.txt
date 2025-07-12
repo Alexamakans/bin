@@ -8,8 +8,8 @@ add_executable(ls ${SRC_FILES})
 target_link_libraries(
   ls
   PRIVATE karg libpasswd
-          # -lm for math.h
-          -lm)
+          # m for log10
+          m)
 
 # === If you need include directories (rare in simple apps) ===
 # target_include_directories(ls PRIVATE ${CMAKE_SOURCE_DIR}/lib/libA)
