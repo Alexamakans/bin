@@ -12,4 +12,4 @@ target_link_libraries(
           -lm)
 
 # === If you need include directories (rare in simple apps) ===
-# target_include_directories(ls PRIVATE ${CMAKE_SOURCE_DIR}/libs/libA)
+# target_include_directories(ls PRIVATE ${CMAKE_SOURCE_DIR}/lib/libA)

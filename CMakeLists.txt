@@ -22,14 +22,14 @@ if(WIN32)
   message(WARNING "POSIX compliance may not be guaranteed on Windows")
 endif()
 
-# Add all libraries in libs/
+# Add all libraries in lib/
 file(
   GLOB LIB_DIRS
-  RELATIVE ${CMAKE_SOURCE_DIR}/libs
-  ${CMAKE_SOURCE_DIR}/libs/*)
+  RELATIVE ${CMAKE_SOURCE_DIR}/lib
+  ${CMAKE_SOURCE_DIR}/lib/*)
 foreach(lib ${LIB_DIRS})
-  if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/libs/${lib})
-    add_subdirectory(libs/${lib})
+  if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/lib/${lib})
+    add_subdirectory(lib/${lib})
   endif()
 endforeach()
 

@@ -7,4 +7,4 @@ add_executable(test_karg ${SRC_FILES})
 target_link_libraries(test_karg PRIVATE karg)
 
 # === If you need include directories (rare in simple apps) ===
-# target_include_directories(test_karg PRIVATE ${CMAKE_SOURCE_DIR}/libs/libA)
+# target_include_directories(test_karg PRIVATE ${CMAKE_SOURCE_DIR}/lib/libA)

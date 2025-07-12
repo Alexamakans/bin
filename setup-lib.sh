@@ -9,7 +9,7 @@ if [ -z "$1" ]; then
 fi
 
 LIB_NAME="$1"
-DIR="libs/$LIB_NAME"
+DIR="lib/$LIB_NAME"
 
 mkdir -p "$DIR"
 
@@ -40,4 +40,4 @@ add_library($LIB_NAME STATIC \${SRC_FILES})
 target_include_directories($LIB_NAME PUBLIC \${CMAKE_CURRENT_SOURCE_DIR})
 EOF
 
-echo "Library '$LIB_NAME' created in libs/$LIB_NAME/"
+echo "Library '$LIB_NAME' created in lib/$LIB_NAME/"

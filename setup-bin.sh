@@ -33,7 +33,7 @@ add_executable($PROJ_NAME \${SRC_FILES})
 # target_link_libraries($PROJ_NAME PRIVATE libA libB)
 
 # === If you need include directories (rare in simple apps) ===
-# target_include_directories($PROJ_NAME PRIVATE \${CMAKE_SOURCE_DIR}/libs/libA)
+# target_include_directories($PROJ_NAME PRIVATE \${CMAKE_SOURCE_DIR}/lib/libA)
 EOF
 
 echo "Binary project '$PROJ_NAME' created in src/$PROJ_NAME/"
